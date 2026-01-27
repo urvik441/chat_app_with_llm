@@ -384,11 +384,26 @@
           object-fit: contain;
         }
 
+        .video-player {
+          width: 100%;
+          height: auto;
+          min-height: 200px;
+          background: #000;
+        }
+
         .message-bubble.user .media-preview {
           border: 2px solid rgba(255, 255, 255, 0.3);
         }
 
         .message-bubble.ai .media-preview {
+          border: 2px solid #e5e7eb;
+        }
+
+        .message-bubble.user .video-player {
+          border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .message-bubble.ai .video-player {
           border: 2px solid #e5e7eb;
         }
 
@@ -464,6 +479,8 @@
         .preview-video {
           width: 300px;
           height: auto;
+          min-height: 150px;
+          background: #000;
         }
 
         .remove-preview-btn {
@@ -534,7 +551,7 @@
         }
 
         .camera-modal {
-          width: min(520px, 100%);
+          width: min(640px, 100%);
           background: #ffffff;
           border-radius: 16px;
           overflow: hidden;
