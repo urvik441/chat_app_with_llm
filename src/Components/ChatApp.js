@@ -22,6 +22,7 @@ export default function ChatApp() {
   const cameraStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
+  const [threadId, setThreadId] = useState("");
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -55,6 +56,16 @@ export default function ChatApp() {
       type,
       name: file?.name || 'attachment',
       _isObjectUrl: isObjectUrl,
+      _file: file, // Store the file reference for conversion
+    });
+  };
+
+  const blobToDataURL = (blob) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
     });
   };
 
@@ -121,7 +132,7 @@ export default function ChatApp() {
       cameraStreamRef.current = stream;
       if (cameraVideoRef.current) {
         cameraVideoRef.current.srcObject = stream;
-        await cameraVideoRef.current.play().catch(() => {});
+        await cameraVideoRef.current.play().catch(() => { });
       }
     } catch (err) {
       console.error('Camera access error:', err);
@@ -218,27 +229,41 @@ export default function ChatApp() {
     if (!inputMessage.trim() && !selectedFile) return;
 
     const messageText = inputMessage.trim();
-    
+
+    // Convert blob URL to data URL if it's an object URL (for videos/images from camera)
+    let fileUrl = filePreview?.url;
+    if (filePreview && filePreview._isObjectUrl && selectedFile) {
+      try {
+        fileUrl = await blobToDataURL(selectedFile);
+      } catch (error) {
+        console.error('Error converting blob to data URL:', error);
+        // Fallback to original URL if conversion fails
+        fileUrl = filePreview.url;
+      }
+    }
+
     const userMessage = {
       id: Date.now(),
       text: messageText,
       sender: 'user',
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       file: filePreview ? {
-        url: filePreview.url,
+        url: fileUrl,
         type: filePreview.type,
         name: filePreview.name
       } : null
     };
 
-    setConversations(prev => prev.map(conv => 
-      conv.id === activeConversation 
+    setConversations(prev => prev.map(conv =>
+      conv.id === activeConversation
         ? { ...conv, messages: [...conv.messages, userMessage] }
         : conv
     ));
 
     setInputMessage('');
-    removeFilePreview();
+    setTimeout(() => {
+      removeFilePreview();
+    }, 0);  
     setIsTyping(true);
 
     try {
@@ -250,7 +275,7 @@ export default function ChatApp() {
             'accept': 'application/json',
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ message: messageText })
+          body: JSON.stringify({ message: messageText, thread_id: threadId })
         });
 
         if (!response.ok) {
@@ -258,7 +283,10 @@ export default function ChatApp() {
         }
 
         const data = await response.json();
-        
+        if (data) {
+          setThreadId(data?.thread_id)
+        }
+
         const aiMessage = {
           id: Date.now() + 1,
           text: data.content || 'No response received',
@@ -266,8 +294,8 @@ export default function ChatApp() {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
 
-        setConversations(prev => prev.map(conv => 
-          conv.id === activeConversation 
+        setConversations(prev => prev.map(conv =>
+          conv.id === activeConversation
             ? { ...conv, messages: [...conv.messages, aiMessage] }
             : conv
         ));
@@ -284,8 +312,8 @@ export default function ChatApp() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
 
-      setConversations(prev => prev.map(conv => 
-        conv.id === activeConversation 
+      setConversations(prev => prev.map(conv =>
+        conv.id === activeConversation
           ? { ...conv, messages: [...conv.messages, errorMessage] }
           : conv
       ));
@@ -318,8 +346,8 @@ export default function ChatApp() {
 
   const saveEdit = () => {
     if (editingTitle.trim()) {
-      setConversations(prev => prev.map(conv => 
-        conv.id === editingId 
+      setConversations(prev => prev.map(conv =>
+        conv.id === editingId
           ? { ...conv, title: editingTitle.trim() }
           : conv
       ));
@@ -338,11 +366,11 @@ export default function ChatApp() {
       alert('You must have at least one conversation!');
       return;
     }
-    
+
     const confirmDelete = window.confirm('Are you sure you want to delete this conversation?');
     if (confirmDelete) {
       setConversations(prev => prev.filter(conv => conv.id !== id));
-      
+
       if (activeConversation === id) {
         const remainingConvs = conversations.filter(conv => conv.id !== id);
         setActiveConversation(remainingConvs[0].id);
@@ -362,17 +390,17 @@ export default function ChatApp() {
               <Sparkles className="sidebar-logo-icon" size={28} />
               <h2 className="sidebar-title">AI Chat</h2>
             </div>
-            
+
             <button onClick={createNewConversation} className="new-chat-btn">
               <Plus size={20} />
               <span>New Conversation</span>
             </button>
           </div>
-          
+
           <div className="conversations-list scrollbar-custom">
             {conversations.map(conv => (
-              <div 
-                key={conv.id} 
+              <div
+                key={conv.id}
                 className={`conversation-item-wrapper ${activeConversation === conv.id ? 'active' : ''}`}
               >
                 {editingId === conv.id ? (
@@ -404,20 +432,20 @@ export default function ChatApp() {
                       <span className="conversation-title">{conv.title}</span>
                     </div>
                     <div className="conversation-actions">
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           startEditing(conv.id, conv.title);
-                        }} 
+                        }}
                         className="action-btn"
                       >
                         <Edit2 size={16} />
                       </button>
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           deleteConversation(conv.id);
-                        }} 
+                        }}
                         className="action-btn delete"
                       >
                         <Trash2 size={16} />
@@ -461,7 +489,7 @@ export default function ChatApp() {
                     <p className="empty-state-text">Ask me anything and I'll help you out!</p>
                   </div>
                 )}
-                
+
                 {currentConv?.messages.map(message => (
                   <div key={message.id} className={`message-row ${message.sender}`}>
                     {message.sender === 'ai' && (
@@ -469,14 +497,23 @@ export default function ChatApp() {
                         <Bot size={20} />
                       </div>
                     )}
-                    
+
                     <div className={`message-bubble ${message.sender} ${message.file ? 'has-media' : ''}`}>
                       {message.file && (
                         <div className="message-media">
                           {message.file.type === 'image' ? (
                             <img src={message.file.url} alt={message.file.name} className="media-preview" />
                           ) : (
-                            <video src={message.file.url} controls className="media-preview">
+                            <video 
+                              src={message.file.url} 
+                              controls 
+                              playsInline
+                              preload="metadata"
+                              className="media-preview video-player"
+                              onError={(e) => {
+                                console.error('Video load error:', e);
+                              }}
+                            >
                               Your browser does not support the video tag.
                             </video>
                           )}
@@ -489,7 +526,7 @@ export default function ChatApp() {
                         {message.timestamp}
                       </p>
                     </div>
-                    
+
                     {message.sender === 'user' && (
                       <div className="message-avatar user">
                         <User size={20} />
@@ -497,7 +534,7 @@ export default function ChatApp() {
                     )}
                   </div>
                 ))}
-                
+
                 {isTyping && (
                   <div className="message-row ai">
                     <div className="message-avatar ai">
@@ -512,7 +549,7 @@ export default function ChatApp() {
                     </div>
                   </div>
                 )}
-                
+
                 <div ref={messagesEndRef} />
               </div>
             </div>
@@ -565,7 +602,13 @@ export default function ChatApp() {
                   {filePreview.type === 'image' ? (
                     <img src={filePreview.url} alt={filePreview.name} className="preview-image" />
                   ) : (
-                    <video src={filePreview.url} className="preview-video" controls />
+                    <video 
+                      src={filePreview.url} 
+                      className="preview-video" 
+                      controls 
+                      playsInline
+                      preload="metadata"
+                    />
                   )}
                   <button onClick={removeFilePreview} className="remove-preview-btn">
                     <XCircle size={20} />
