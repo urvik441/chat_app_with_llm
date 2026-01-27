@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Menu, Plus, MessageSquare, Sparkles, User, Bot, Edit2, Trash2, Check, X, Paperclip, XCircle, Camera, Video, Square, Aperture } from 'lucide-react';
+import { Send, Menu, Plus, MessageSquare, Sparkles, User, Bot, Edit2, Trash2, Check, X, Paperclip, XCircle, Camera, Video, Square, Aperture, Mic } from 'lucide-react';
 import './ChatApp.css';
 
 export default function ChatApp() {
@@ -16,12 +16,18 @@ export default function ChatApp() {
   const [filePreview, setFilePreview] = useState(null);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const cameraVideoRef = useRef(null);
   const cameraStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordedChunksRef = useRef([]);
+  const audioStreamRef = useRef(null);
+  const audioRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
   const [threadId, setThreadId] = useState("");
 
   const scrollToBottom = () => {
@@ -38,6 +44,12 @@ export default function ChatApp() {
       try {
         if (cameraStreamRef.current) {
           cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+        }
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach((t) => t.stop());
+        }
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
         }
       } catch {
         // ignore
@@ -72,19 +84,22 @@ export default function ChatApp() {
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (file) {
-      // Check if file is image or video
-      if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
-        // If we had an objectURL from camera, revoke it before replacing
+      // Check if file is image, video, or audio
+      if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) {
+        // If we had an objectURL from camera/audio, revoke it before replacing
         if (filePreview?._isObjectUrl && filePreview?.url) {
           try { URL.revokeObjectURL(filePreview.url); } catch { /* ignore */ }
         }
         const reader = new FileReader();
         reader.onloadend = () => {
-          setPreviewFromFile(file, reader.result, file.type.startsWith('image/') ? 'image' : 'video', false);
+          let fileType = 'image';
+          if (file.type.startsWith('video/')) fileType = 'video';
+          else if (file.type.startsWith('audio/')) fileType = 'audio';
+          setPreviewFromFile(file, reader.result, fileType, false);
         };
         reader.readAsDataURL(file);
       } else {
-        alert('Please select an image or video file');
+        alert('Please select an image, video, or audio file');
       }
     }
   };
@@ -225,6 +240,136 @@ export default function ChatApp() {
     }
   };
 
+  const startAudioRecording = async () => {
+    try {
+      console.log('Starting audio recording...');
+      console.log('MediaRecorder available:', !!window.MediaRecorder);
+      console.log('navigator.mediaDevices available:', !!navigator.mediaDevices);
+      console.log('navigator.mediaDevices.getUserMedia available:', !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia));
+
+      // Check for MediaRecorder support first
+      if (!window.MediaRecorder) {
+        alert('Audio recording is not supported in this browser. Please use a modern browser like Chrome, Firefox, or Edge.');
+        setIsRecordingAudio(false);
+        return;
+      }
+
+      // Check for getUserMedia support with fallback for older browsers
+      let getUserMedia = null;
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        console.log('Using navigator.mediaDevices.getUserMedia');
+      } else if (navigator.getUserMedia) {
+        // Fallback for older browsers
+        getUserMedia = (constraints) => {
+          return new Promise((resolve, reject) => {
+            navigator.getUserMedia(constraints, resolve, reject);
+          });
+        };
+        console.log('Using navigator.getUserMedia (fallback)');
+      } else {
+        console.error('getUserMedia not available');
+        alert('Microphone access is not available in this browser. Please use a modern browser and ensure you grant microphone permissions.');
+        setIsRecordingAudio(false);
+        return;
+      }
+
+      console.log('Requesting microphone access...');
+      const stream = await getUserMedia({ audio: true });
+      console.log('Microphone access granted, stream:', stream);
+      audioStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      let mimeType = '';
+      if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (window.MediaRecorder && MediaRecorder.isTypeSupported('audio/ogg')) {
+        mimeType = 'audio/ogg';
+      }
+
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      audioRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const chunks = audioChunksRef.current;
+        if (!chunks.length) {
+          stopAudioRecording();
+          return;
+        }
+        const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
+        const file = new File([blob], `audio_${Date.now()}.webm`, { type: blob.type });
+        const url = URL.createObjectURL(blob);
+        removeFilePreview();
+        setPreviewFromFile(file, url, 'audio', true);
+        audioChunksRef.current = [];
+        stopAudioRecording();
+      };
+
+      recorder.start();
+      setIsRecordingAudio(true);
+      setRecordingTime(0);
+
+      // Start timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      console.error('Microphone access error:', err);
+      setIsRecordingAudio(false);
+      setRecordingTime(0);
+
+      // Provide more specific error messages
+      let errorMessage = 'Unable to access microphone. ';
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage += 'Please allow microphone permission in your browser settings.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMessage += 'No microphone found. Please connect a microphone and try again.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage += 'Microphone is already in use by another application.';
+      } else if (err.name === 'OverconstrainedError' || err.name === 'ConstraintNotSatisfiedError') {
+        errorMessage += 'Microphone constraints could not be satisfied.';
+      } else {
+        errorMessage += `Error: ${err.message || 'Unknown error occurred'}`;
+      }
+
+      alert(errorMessage);
+    }
+  };
+
+  const stopAudioRecording = () => {
+    try {
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      audioRecorderRef.current?.stop();
+      setIsRecordingAudio(false);
+      setRecordingTime(0);
+
+      // Stop all tracks
+      if (audioStreamRef.current) {
+        audioStreamRef.current.getTracks().forEach((t) => t.stop());
+        audioStreamRef.current = null;
+      }
+    } catch (e) {
+      console.error('Stop audio recording error:', e);
+      setIsRecordingAudio(false);
+      setRecordingTime(0);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const sendMessage = async () => {
     if (!inputMessage.trim() && !selectedFile) return;
 
@@ -263,7 +408,7 @@ export default function ChatApp() {
     setInputMessage('');
     setTimeout(() => {
       removeFilePreview();
-    }, 0);  
+    }, 0);
     setIsTyping(true);
 
     try {
@@ -503,10 +648,10 @@ export default function ChatApp() {
                         <div className="message-media">
                           {message.file.type === 'image' ? (
                             <img src={message.file.url} alt={message.file.name} className="media-preview" />
-                          ) : (
-                            <video 
-                              src={message.file.url} 
-                              controls 
+                          ) : message.file.type === 'video' ? (
+                            <video
+                              src={message.file.url}
+                              controls
                               playsInline
                               preload="metadata"
                               className="media-preview video-player"
@@ -516,6 +661,18 @@ export default function ChatApp() {
                             >
                               Your browser does not support the video tag.
                             </video>
+                          ) : (
+                            <audio
+                              src={message.file.url}
+                              controls
+                              preload="metadata"
+                              className="media-preview audio-player"
+                              onError={(e) => {
+                                console.error('Audio load error:', e);
+                              }}
+                            >
+                              Your browser does not support the audio tag.
+                            </audio>
                           )}
                         </div>
                       )}
@@ -601,12 +758,19 @@ export default function ChatApp() {
                 <div className="file-preview">
                   {filePreview.type === 'image' ? (
                     <img src={filePreview.url} alt={filePreview.name} className="preview-image" />
-                  ) : (
-                    <video 
-                      src={filePreview.url} 
-                      className="preview-video" 
-                      controls 
+                  ) : filePreview.type === 'video' ? (
+                    <video
+                      src={filePreview.url}
+                      className="preview-video"
+                      controls
                       playsInline
+                      preload="metadata"
+                    />
+                  ) : (
+                    <audio
+                      src={filePreview.url}
+                      className="preview-audio"
+                      controls
                       preload="metadata"
                     />
                   )}
@@ -621,7 +785,7 @@ export default function ChatApp() {
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileSelect}
-                accept="image/*,video/*"
+                accept="image/*,video/*,audio/*"
                 style={{ display: 'none' }}
                 id="file-input"
               />
@@ -631,6 +795,26 @@ export default function ChatApp() {
               <button type="button" className="file-attach-btn camera-btn" onClick={openCamera} aria-label="Open camera">
                 <Camera size={22} />
               </button>
+              {!isRecordingAudio ? (
+                <button
+                  type="button"
+                  className="file-attach-btn audio-btn"
+                  onClick={startAudioRecording}
+                  aria-label="Start audio recording"
+                >
+                  <Mic size={22} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="file-attach-btn audio-btn recording"
+                  onClick={stopAudioRecording}
+                  aria-label="Stop audio recording"
+                >
+                  <Square size={22} />
+                  <span className="recording-time">{formatTime(recordingTime)}</span>
+                </button>
+              )}
               <div className="input-wrapper">
                 <textarea
                   value={inputMessage}
