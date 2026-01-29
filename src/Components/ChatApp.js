@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Menu, Plus, MessageSquare, Sparkles, User, Bot, Edit2, Trash2, Check, X, Paperclip, XCircle, Camera, Video, Square, Aperture, Mic } from 'lucide-react';
+import { Send, Menu, Plus, MessageSquare, Sparkles, User, Bot, Edit2, Trash2, Check, X, Paperclip, XCircle, Camera, Video, Square, Aperture, Mic, LogOut } from 'lucide-react';
 import './ChatApp.css';
 
-export default function ChatApp() {
+export default function ChatApp({ onLogout, currentUser }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [conversations, setConversations] = useState([
     { id: 1, title: 'New Conversation', messages: [] }
@@ -59,6 +59,11 @@ export default function ChatApp() {
 
   const getCurrentConversation = () => {
     return conversations.find(c => c.id === activeConversation);
+  };
+
+  const isMediaEnabledForCurrentConversation = () => {
+    const conv = getCurrentConversation();
+    return !!(conv && Array.isArray(conv.messages) && conv.messages.length > 0);
   };
 
   const setPreviewFromFile = (file, previewUrl, type, isObjectUrl = false) => {
@@ -130,6 +135,7 @@ export default function ChatApp() {
 
   const openCamera = async () => {
     try {
+      if (!isMediaEnabledForCurrentConversation()) return;
       setIsCameraOpen(true);
 
       if (!navigator?.mediaDevices?.getUserMedia) {
@@ -242,6 +248,7 @@ export default function ChatApp() {
 
   const startAudioRecording = async () => {
     try {
+      if (!isMediaEnabledForCurrentConversation()) return;
       console.log('Starting audio recording...');
       console.log('MediaRecorder available:', !!window.MediaRecorder);
       console.log('navigator.mediaDevices available:', !!navigator.mediaDevices);
@@ -256,10 +263,10 @@ export default function ChatApp() {
 
       // Check for getUserMedia support with fallback for older browsers
       let getUserMedia = null;
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      if (navigator?.mediaDevices && navigator?.mediaDevices?.getUserMedia) {
         getUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
         console.log('Using navigator.mediaDevices.getUserMedia');
-      } else if (navigator.getUserMedia) {
+      } else if (navigator?.getUserMedia) {
         // Fallback for older browsers
         getUserMedia = (constraints) => {
           return new Promise((resolve, reject) => {
@@ -524,6 +531,7 @@ export default function ChatApp() {
   };
 
   const currentConv = getCurrentConversation();
+  const mediaEnabled = isMediaEnabledForCurrentConversation();
 
   return (
     <>
@@ -607,18 +615,33 @@ export default function ChatApp() {
         <div className="main-chat-area">
           {/* Header */}
           <div className="chat-header">
-            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="menu-toggle-btn">
-              <Menu size={24} />
-            </button>
-            <div className="header-info">
-              <div className="header-avatar">
-                <Bot size={20} />
-              </div>
-              <div className="header-text-container">
-                <h1 className="header-title">AI Assistant</h1>
-                <p className="header-subtitle">Always here to help</p>
+            <div className="chat-header-left">
+              <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="menu-toggle-btn">
+                <Menu size={24} />
+              </button>
+              <div className="header-info">
+                <div className="header-avatar">
+                  <Bot size={20} />
+                </div>
+                <div className="header-text-container">
+                  <h1 className="header-title">AI Assistant</h1>
+                  <p className="header-subtitle">
+                    {currentUser?.username ? `Signed in as ${currentUser.username}` : 'Always here to help'}
+                  </p>
+                </div>
               </div>
             </div>
+            {onLogout && (
+              <button
+                type="button"
+                className="logout-btn"
+                onClick={onLogout}
+                aria-label="Log out"
+              >
+                <LogOut size={18} />
+                <span>Logout</span>
+              </button>
+            )}
           </div>
 
           {/* Messages Area */}
@@ -786,21 +809,36 @@ export default function ChatApp() {
                 ref={fileInputRef}
                 onChange={handleFileSelect}
                 accept="image/*,video/*,audio/*"
+                disabled={!mediaEnabled}
                 style={{ display: 'none' }}
                 id="file-input"
               />
-              <label htmlFor="file-input" className="file-attach-btn">
+              <label
+                htmlFor="file-input"
+                className={`file-attach-btn ${!mediaEnabled ? 'disabled' : ''}`}
+                aria-disabled={!mediaEnabled}
+                title={!mediaEnabled ? 'Send your first message to enable attachments' : 'Attach file'}
+              >
                 <Paperclip size={22} />
               </label>
-              <button type="button" className="file-attach-btn camera-btn" onClick={openCamera} aria-label="Open camera">
+              <button
+                type="button"
+                className={`file-attach-btn camera-btn ${!mediaEnabled ? 'disabled' : ''}`}
+                onClick={openCamera}
+                aria-label="Open camera"
+                disabled={!mediaEnabled}
+                title={!mediaEnabled ? 'Send your first message to enable camera' : 'Open camera'}
+              >
                 <Camera size={22} />
               </button>
               {!isRecordingAudio ? (
                 <button
                   type="button"
-                  className="file-attach-btn audio-btn"
+                  className={`file-attach-btn audio-btn ${!mediaEnabled ? 'disabled' : ''}`}
                   onClick={startAudioRecording}
                   aria-label="Start audio recording"
+                  disabled={!mediaEnabled}
+                  title={!mediaEnabled ? 'Send your first message to enable audio recording' : 'Start audio recording'}
                 >
                   <Mic size={22} />
                 </button>
